@@ -50,6 +50,7 @@ export interface ZoteroItemData {
   tags?: ZoteroTag[];
   collections?: string[];
   relations?: Record<string, string | string[]>;
+  deleted?: number; // 1 = 在垃圾箱中
   [key: string]: unknown;
 }
 

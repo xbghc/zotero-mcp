@@ -6,6 +6,7 @@ Zotero MCP Server - 通过 MCP 协议管理 Zotero 文献库。
 
 - **查询文献**: 搜索、获取详情、按分组/标签过滤
 - **创建文献**: 手动创建或通过 DOI/ISBN/PMID 自动获取元数据
+- **管理文献**: 更新文献、删除文献（移到垃圾箱）、添加标签、添加到分组
 - **导出引用**: 支持 BibTeX、RIS、CSL JSON 等格式
 
 ## 安装
@@ -87,6 +88,15 @@ npm start
 |------|------|
 | `create_item` | 手动创建文献 |
 | `create_item_by_identifier` | 通过 DOI/ISBN/PMID 创建 |
+
+### 管理
+
+| Tool | 说明 |
+|------|------|
+| `update_item` | 更新文献元数据 |
+| `delete_item` | 删除文献（移到垃圾箱） |
+| `add_tags_to_item` | 为文献添加标签 |
+| `add_item_to_collection` | 将文献添加到分组 |
 
 ### 导出
 

@@ -15,6 +15,7 @@ import { registerCollectionTools } from './tools/collections.js';
 import { registerTagTools } from './tools/tags.js';
 import { registerCreateTools } from './tools/create.js';
 import { registerExportTools } from './tools/export.js';
+import { registerManageTools } from './tools/manage.js';
 
 // 从环境变量读取配置
 const ZOTERO_API_KEY = process.env.ZOTERO_API_KEY;
@@ -54,6 +55,7 @@ registerCollectionTools(server, zoteroClient);
 registerTagTools(server, zoteroClient);
 registerCreateTools(server, zoteroClient, translationClient);
 registerExportTools(server, zoteroClient);
+registerManageTools(server, zoteroClient);
 
 // 启动服务器
 async function main() {

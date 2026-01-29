@@ -250,6 +250,7 @@ export class ZoteroClient {
     await this.getLibraryVersion();
 
     const path = `${this.getLibraryPath()}/items`;
+
     const { data } = await this.request<ZoteroWriteResponse>(path, {
       method: 'POST',
       body: [itemData],
@@ -315,5 +316,97 @@ export class ZoteroClient {
 
     const { data } = await this.request<string>(path, { params });
     return data;
+  }
+
+  /**
+   * 更新文献
+   */
+  async updateItem(
+    itemKey: string,
+    updates: Partial<ZoteroItemData>
+  ): Promise<void> {
+    // 先获取当前文献以获取版本号
+    const item = await this.getItem(itemKey);
+    const currentVersion = item.version;
+
+    // PATCH 请求需要在请求头中包含版本号
+    const path = `${this.getLibraryPath()}/items/${itemKey}`;
+    const url = new URL(`${ZOTERO_API_BASE}${path}`);
+    const headers: Record<string, string> = {
+      'Zotero-API-Key': this.config.apiKey,
+      'Zotero-API-Version': '3',
+      'Content-Type': 'application/json',
+      'If-Unmodified-Since-Version': String(currentVersion),
+    };
+
+    await this.throttle();
+    const response = await fetch(url.toString(), {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(updates),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Zotero API error (${response.status}): ${errorText}`);
+    }
+
+    // 更新本地版本号
+    const newVersion = response.headers.get('Last-Modified-Version');
+    if (newVersion) {
+      this.libraryVersion = parseInt(newVersion, 10);
+    }
+  }
+
+  /**
+   * 删除文献（移到垃圾箱）
+   * 通过设置 deleted: 1 将文献移到垃圾箱，而不是永久删除
+   */
+  async deleteItem(itemKey: string): Promise<void> {
+    // 使用 PATCH 设置 deleted: 1 来移动到垃圾箱
+    await this.updateItem(itemKey, { deleted: 1 } as Partial<ZoteroItemData>);
+  }
+
+  /**
+   * 为文献添加标签
+   */
+  async addTagsToItem(itemKey: string, tags: string[]): Promise<void> {
+    // 获取当前文献
+    const item = await this.getItem(itemKey);
+    const existingTags = item.data.tags || [];
+
+    // 合并标签（去重）
+    const existingTagNames = new Set(existingTags.map((t) => t.tag));
+    const newTags = tags.filter((tag) => !existingTagNames.has(tag));
+    const mergedTags = [
+      ...existingTags,
+      ...newTags.map((tag) => ({ tag })),
+    ];
+
+    // 更新文献
+    await this.updateItem(itemKey, { tags: mergedTags });
+  }
+
+  /**
+   * 将文献添加到分组
+   */
+  async addItemToCollection(
+    itemKey: string,
+    collectionKey: string
+  ): Promise<void> {
+    // 获取当前文献
+    const item = await this.getItem(itemKey);
+    const existingCollections = item.data.collections || [];
+
+    // 检查是否已在该分组
+    if (existingCollections.includes(collectionKey)) {
+      return; // 已经在分组中
+    }
+
+    // 添加到分组
+    const mergedCollections = [...existingCollections, collectionKey];
+
+    // 更新文献
+    await this.updateItem(itemKey, { collections: mergedCollections });
   }
 }
