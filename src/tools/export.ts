@@ -16,23 +16,134 @@ export function registerExportTools(server: McpServer, zoteroClient: ZoteroClien
     {
       title: 'Export Bibliography',
       description: `Export items as formatted bibliography or citation data.
-Formats:
+
+**Selection methods (use ONE):**
+- itemKeys: Export specific items by their keys
+- collectionKey: Export all items in a collection
+- tag: Export all items with a specific tag
+- query: Export items matching a search query
+- exportAll: Export entire library (use with caution for large libraries)
+
+**Formats:**
 - bibtex: BibTeX format for LaTeX
 - ris: RIS format for reference managers
 - csljson: CSL JSON for citation processors
 - bibliography: Formatted citation text (use 'style' parameter)
+
 Common styles for bibliography: apa, chicago-author-date, ieee, vancouver, harvard`,
       inputSchema: {
-        itemKeys: z.array(z.string()).min(1).describe('Item keys to export'),
+        // 选择方式（多选一）
+        itemKeys: z.array(z.string()).optional().describe('Specific item keys to export'),
+        collectionKey: z.string().optional().describe('Export all items in this collection'),
+        tag: z.string().optional().describe('Export all items with this tag'),
+        query: z.string().optional().describe('Export items matching this search query'),
+        exportAll: z.boolean().optional().describe('Export entire library (may be slow for large libraries)'),
+        // 导出格式
         format: z.enum(['bibtex', 'ris', 'csljson', 'bibliography', 'coins', 'refer', 'tei']).describe('Export format'),
         style: z.string().optional().describe('Citation style for bibliography format (e.g., apa, chicago-author-date, ieee)'),
+        // 数量限制
+        limit: z.number().min(1).max(500).optional().describe('Maximum items to export (default 100, max 500, ignored when exportAll=true)'),
       },
     },
-    async ({ itemKeys, format, style }) => {
-      const result = await zoteroClient.exportItems(itemKeys, format, style);
-      return {
-        content: [{ type: 'text' as const, text: result }],
-      };
+    async ({ itemKeys, collectionKey, tag, query, exportAll, format, style, limit }) => {
+      let keysToExport: string[] = [];
+      const effectiveLimit = limit || 100;
+
+      try {
+        // 根据不同的选择方式获取 itemKeys
+        if (itemKeys && itemKeys.length > 0) {
+          // 直接指定 keys
+          keysToExport = itemKeys;
+        } else if (collectionKey) {
+          // 按分组导出
+          keysToExport = await getAllItemKeys(zoteroClient, { collectionKey }, effectiveLimit, !!exportAll);
+        } else if (tag) {
+          // 按标签导出
+          keysToExport = await getAllItemKeys(zoteroClient, { tag }, effectiveLimit, !!exportAll);
+        } else if (query) {
+          // 按搜索条件导出
+          keysToExport = await getAllItemKeys(zoteroClient, { query }, effectiveLimit, !!exportAll);
+        } else if (exportAll) {
+          // 导出全部
+          keysToExport = await getAllItemKeys(zoteroClient, {}, effectiveLimit, true);
+        } else {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({
+              success: false,
+              error: 'Please provide one of: itemKeys, collectionKey, tag, query, or set exportAll=true',
+            }, null, 2) }],
+          };
+        }
+
+        if (keysToExport.length === 0) {
+          return {
+            content: [{ type: 'text' as const, text: JSON.stringify({
+              success: false,
+              error: 'No items found matching the criteria',
+            }, null, 2) }],
+          };
+        }
+
+        const result = await zoteroClient.exportItems(keysToExport, format, style);
+
+        // 添加导出信息头
+        const header = `% Exported ${keysToExport.length} items\n% Format: ${format}\n\n`;
+
+        return {
+          content: [{ type: 'text' as const, text: header + result }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          }, null, 2) }],
+        };
+      }
     }
   );
+}
+
+/**
+ * 获取所有符合条件的 item keys（支持分页）
+ */
+async function getAllItemKeys(
+  zoteroClient: ZoteroClient,
+  params: { collectionKey?: string; tag?: string; query?: string },
+  limit: number,
+  fetchAll: boolean
+): Promise<string[]> {
+  const keys: string[] = [];
+  const pageSize = 100; // Zotero API 单次最多 100 条
+  let start = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const result = await zoteroClient.searchItems({
+      ...params,
+      limit: pageSize,
+      start,
+    });
+
+    for (const item of result.items) {
+      keys.push(item.key);
+    }
+
+    // 检查是否还有更多
+    if (!fetchAll) {
+      // 非全部导出模式，检查是否达到限制
+      if (keys.length >= limit) {
+        return keys.slice(0, limit);
+      }
+    }
+
+    // 检查是否还有下一页
+    if (result.items.length < pageSize || keys.length >= result.totalResults) {
+      hasMore = false;
+    } else {
+      start += pageSize;
+    }
+  }
+
+  return fetchAll ? keys : keys.slice(0, limit);
 }
