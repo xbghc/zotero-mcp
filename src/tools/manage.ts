@@ -188,4 +188,92 @@ export function registerManageTools(
       };
     }
   );
+
+  // download_attachment - 下载附件文件
+  server.tool(
+    'download_attachment',
+    'Download an attachment file to local cache. Returns the local file path.',
+    {
+      itemKey: z.string().describe('The key of the attachment item'),
+      force: z.boolean().optional().describe('Force re-download even if cached (default false)'),
+    },
+    async (params) => {
+      try {
+        const result = await zoteroClient.downloadAttachment(params.itemKey, {
+          force: params.force,
+        });
+
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  success: true,
+                  itemKey: params.itemKey,
+                  path: result.path,
+                  filename: result.filename,
+                  contentType: result.contentType,
+                  size: result.size,
+                  fromCache: result.fromCache,
+                  message: result.fromCache
+                    ? `File retrieved from cache: ${result.path}`
+                    : `File downloaded to: ${result.path}`,
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(
+                {
+                  success: false,
+                  itemKey: params.itemKey,
+                  error: error instanceof Error ? error.message : String(error),
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // clear_attachment_cache - 清除附件缓存
+  server.tool(
+    'clear_attachment_cache',
+    'Clear cached attachment files',
+    {
+      itemKey: z.string().optional().describe('Clear cache for specific item. If not provided, clears all cache.'),
+    },
+    async (params) => {
+      await zoteroClient.clearAttachmentCache(params.itemKey);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              {
+                success: true,
+                message: params.itemKey
+                  ? `Cache cleared for item ${params.itemKey}`
+                  : 'All attachment cache cleared',
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
 }

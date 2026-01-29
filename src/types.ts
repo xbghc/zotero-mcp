@@ -118,6 +118,30 @@ export interface SearchParams {
   start?: number;
   sort?: string;
   direction?: 'asc' | 'desc';
+  // 新增参数
+  qmode?: 'titleCreatorYear' | 'everything'; // everything 可搜索笔记和全文
+  includeTrashed?: boolean; // 是否包含垃圾箱项目
+  includeChildren?: boolean; // 是否包含子项目（笔记、附件）
+}
+
+// 保存的搜索
+export interface ZoteroSavedSearch {
+  key: string;
+  version: number;
+  library: {
+    type: string;
+    id: number;
+    name?: string;
+  };
+  data: {
+    key: string;
+    name: string;
+    conditions: Array<{
+      condition: string;
+      operator: string;
+      value: string;
+    }>;
+  };
 }
 
 // 创建项目参数

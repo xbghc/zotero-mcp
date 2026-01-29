@@ -11,7 +11,9 @@ import type {
   ZoteroItemData,
   SearchParams,
   TagSummary,
+  ZoteroSavedSearch,
 } from './types.js';
+import { CacheManager } from './cache.js';
 
 const ZOTERO_API_BASE = 'https://api.zotero.org';
 
@@ -24,9 +26,13 @@ export class ZoteroClient {
   private lastRequestTime: number = 0;
   private backoffUntil: number = 0;
   private requestInterval: number = DEFAULT_REQUEST_INTERVAL;
+  private cacheManager: CacheManager;
 
   constructor(config: ZoteroConfig) {
     this.config = config;
+    const libraryType = config.groupId ? 'group' : 'user';
+    const libraryId = config.groupId || config.userId;
+    this.cacheManager = new CacheManager(libraryType, libraryId);
   }
 
   /**
@@ -175,20 +181,33 @@ export class ZoteroClient {
 
   /**
    * 搜索文献
+   * @param params.qmode - 'everything' 可搜索笔记内容和全文
+   * @param params.includeChildren - true 时包含子项目（笔记、附件）
+   * @param params.includeTrashed - true 时包含垃圾箱项目
    */
   async searchItems(params: SearchParams = {}): Promise<{
     items: ZoteroItem[];
     totalResults: number;
   }> {
-    const path = params.collectionKey
-      ? `${this.getLibraryPath()}/collections/${params.collectionKey}/items/top`
-      : `${this.getLibraryPath()}/items/top`;
+    // 根据 includeChildren 选择端点
+    let path: string;
+    if (params.collectionKey) {
+      path = params.includeChildren
+        ? `${this.getLibraryPath()}/collections/${params.collectionKey}/items`
+        : `${this.getLibraryPath()}/collections/${params.collectionKey}/items/top`;
+    } else {
+      path = params.includeChildren
+        ? `${this.getLibraryPath()}/items`
+        : `${this.getLibraryPath()}/items/top`;
+    }
 
     const { data, headers } = await this.request<ZoteroItem[]>(path, {
       params: {
         q: params.query,
+        qmode: params.qmode,
         itemType: params.itemType,
         tag: params.tag,
+        includeTrashed: params.includeTrashed ? 1 : undefined,
         limit: params.limit || 25,
         start: params.start || 0,
         sort: params.sort || 'dateModified',
@@ -494,5 +513,134 @@ export class ZoteroClient {
 
     // 更新文献
     await this.updateItem(itemKey, { collections: mergedCollections });
+  }
+
+  /**
+   * 获取垃圾箱中的文献
+   */
+  async getTrashItems(limit: number = 25): Promise<ZoteroItem[]> {
+    const path = `${this.getLibraryPath()}/items/trash`;
+    const { data } = await this.request<ZoteroItem[]>(path, {
+      params: {
+        limit,
+        sort: 'dateModified',
+        direction: 'desc',
+      },
+    });
+    return data;
+  }
+
+  /**
+   * 获取保存的搜索
+   */
+  async getSavedSearches(): Promise<ZoteroSavedSearch[]> {
+    const path = `${this.getLibraryPath()}/searches`;
+    const { data } = await this.request<ZoteroSavedSearch[]>(path);
+    return data;
+  }
+
+  /**
+   * 下载附件文件（支持缓存）
+   * @param itemKey 附件的 key
+   * @param options.force 强制重新下载，忽略缓存
+   * @returns 本地文件路径和元数据
+   */
+  async downloadAttachment(
+    itemKey: string,
+    options: { force?: boolean } = {}
+  ): Promise<{
+    path: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    fromCache: boolean;
+  }> {
+    // 获取附件信息以验证类型和获取版本号
+    const item = await this.getItem(itemKey);
+
+    if (item.data.itemType !== 'attachment') {
+      throw new Error(`Item ${itemKey} is not an attachment (type: ${item.data.itemType})`);
+    }
+
+    // 只支持存储的文件附件
+    const linkMode = item.data.linkMode;
+    if (linkMode !== 'imported_file' && linkMode !== 'imported_url') {
+      throw new Error(
+        `Attachment ${itemKey} is not a stored file (linkMode: ${linkMode}). ` +
+        `Only imported_file and imported_url attachments can be downloaded.`
+      );
+    }
+
+    const filename = item.data.filename || `${itemKey}.bin`;
+    const contentType = item.data.contentType || 'application/octet-stream';
+    const version = item.version;
+
+    // 检查缓存（除非强制刷新）
+    if (!options.force) {
+      const isValid = await this.cacheManager.isValid(itemKey, version);
+      if (isValid) {
+        const cachedPath = await this.cacheManager.getCachedFilePath(itemKey);
+        if (cachedPath) {
+          const meta = await this.cacheManager.getMeta(itemKey);
+          return {
+            path: cachedPath,
+            filename: meta!.filename,
+            contentType: meta!.contentType,
+            size: meta!.size,
+            fromCache: true,
+          };
+        }
+      }
+    }
+
+    // 从 API 下载文件
+    const path = `${this.getLibraryPath()}/items/${itemKey}/file`;
+    const url = `${ZOTERO_API_BASE}${path}`;
+
+    await this.throttle();
+
+    const response = await fetch(url, {
+      headers: {
+        'Zotero-API-Key': this.config.apiKey,
+        'Zotero-API-Version': '3',
+      },
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Failed to download attachment (${response.status}): ${errorText}`);
+    }
+
+    // 获取文件内容
+    const arrayBuffer = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuffer);
+
+    // 保存到缓存
+    const savedPath = await this.cacheManager.save(itemKey, filename, buffer, {
+      version,
+      filename,
+      contentType,
+      size: buffer.length,
+    });
+
+    return {
+      path: savedPath,
+      filename,
+      contentType,
+      size: buffer.length,
+      fromCache: false,
+    };
+  }
+
+  /**
+   * 清除附件缓存
+   * @param itemKey 可选，指定则只清除该项目的缓存，否则清除所有
+   */
+  async clearAttachmentCache(itemKey?: string): Promise<void> {
+    if (itemKey) {
+      await this.cacheManager.invalidate(itemKey);
+    } else {
+      await this.cacheManager.clearAll();
+    }
   }
 }

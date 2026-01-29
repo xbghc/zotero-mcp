@@ -69,18 +69,54 @@ npm start
 | `ZOTERO_USER_ID` | 是 | 用户 ID |
 | `ZOTERO_GROUP_ID` | 否 | 群组 ID（访问群组库时使用） |
 | `TRANSLATION_SERVER_URL` | 否 | Translation Server 地址（默认 `http://localhost:1969`） |
+| `ZOTERO_MCP_CACHE_DIR` | 否 | 附件缓存目录（默认按系统规范） |
+
+### 附件缓存目录
+
+下载的附件会缓存到本地，默认目录按系统规范：
+
+| 系统 | 默认缓存目录 |
+|------|------------|
+| Linux | `~/.cache/zotero-mcp` |
+| macOS | `~/Library/Caches/zotero-mcp` |
+| Windows | `%LOCALAPPDATA%\zotero-mcp\cache` |
+
+可通过 `ZOTERO_MCP_CACHE_DIR` 环境变量自定义。
 
 ## 可用 Tools
+
+### 搜索参数说明
+
+`search_items` 支持以下高级参数：
+
+| 参数 | 说明 |
+|------|------|
+| `qmode` | `titleCreatorYear`（默认）或 `everything`（搜索笔记和全文） |
+| `itemType` | 过滤类型，如 `journalArticle`、`book`、`note` |
+| `includeChildren` | 设为 `true` 时包含子项目（笔记、附件） |
+| `includeTrashed` | 设为 `true` 时包含垃圾箱中的项目 |
+
+示例：搜索所有笔记
+```
+itemType: "note", includeChildren: true
+```
+
+示例：全文搜索
+```
+query: "machine learning", qmode: "everything"
+```
 
 ### 查询
 
 | Tool | 说明 |
 |------|------|
-| `search_items` | 搜索文献 |
+| `search_items` | 搜索文献（支持 qmode、includeChildren、includeTrashed） |
 | `get_item` | 获取文献详情 |
 | `get_recent_items` | 获取最近添加的文献 |
 | `get_item_children` | 获取附件和笔记 |
-| `get_item_fulltext` | 获取全文内容 |
+| `get_item_fulltext` | 获取全文内容（支持分页） |
+| `get_trash_items` | 获取垃圾箱中的文献 |
+| `get_saved_searches` | 获取保存的搜索 |
 | `list_collections` | 列出分组 |
 | `get_collection_items` | 获取分组内文献 |
 | `list_tags` | 列出标签 |
@@ -100,6 +136,8 @@ npm start
 | `delete_item` | 删除文献（移到垃圾箱） |
 | `add_tags_to_item` | 为文献添加标签 |
 | `add_item_to_collection` | 将文献添加到分组 |
+| `download_attachment` | 下载附件文件到本地（支持缓存） |
+| `clear_attachment_cache` | 清除附件缓存 |
 
 ### 导出
 

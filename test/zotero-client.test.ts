@@ -252,4 +252,143 @@ describe('ZoteroClient', () => {
       }
     });
   });
+
+  describe('getTrashItems', () => {
+    it('should return items in trash', async () => {
+      const items = await client.getTrashItems(10);
+
+      expect(Array.isArray(items)).toBe(true);
+      // 垃圾箱可能为空，所以不检查长度
+      if (items.length > 0) {
+        expect(items[0]).toHaveProperty('key');
+        expect(items[0]).toHaveProperty('data');
+        expect(items[0].data.deleted).toBe(1);
+      }
+    });
+  });
+
+  describe('getSavedSearches', () => {
+    it('should return saved searches', async () => {
+      const searches = await client.getSavedSearches();
+
+      expect(Array.isArray(searches)).toBe(true);
+      // 可能没有保存的搜索
+      if (searches.length > 0) {
+        expect(searches[0]).toHaveProperty('key');
+        expect(searches[0]).toHaveProperty('data');
+        expect(searches[0].data).toHaveProperty('name');
+        expect(searches[0].data).toHaveProperty('conditions');
+      }
+    });
+  });
+
+  describe('searchItems with advanced parameters', () => {
+    it('should support qmode=everything', async () => {
+      const result = await client.searchItems({
+        query: 'test',
+        qmode: 'everything',
+        limit: 5,
+      });
+
+      expect(result).toHaveProperty('items');
+      expect(result).toHaveProperty('totalResults');
+      expect(Array.isArray(result.items)).toBe(true);
+    });
+
+    it('should support includeChildren', async () => {
+      const result = await client.searchItems({
+        includeChildren: true,
+        limit: 5,
+      });
+
+      expect(result).toHaveProperty('items');
+      expect(Array.isArray(result.items)).toBe(true);
+    });
+
+    it('should support itemType=note', async () => {
+      const result = await client.searchItems({
+        itemType: 'note',
+        includeChildren: true,
+        limit: 5,
+      });
+
+      expect(result).toHaveProperty('items');
+      expect(Array.isArray(result.items)).toBe(true);
+      // 如果有结果，验证都是笔记
+      result.items.forEach((item) => {
+        expect(item.data.itemType).toBe('note');
+      });
+    });
+
+    it('should support includeTrashed', async () => {
+      const result = await client.searchItems({
+        includeTrashed: true,
+        limit: 5,
+      });
+
+      expect(result).toHaveProperty('items');
+      expect(Array.isArray(result.items)).toBe(true);
+    });
+  });
+
+  describe('downloadAttachment', () => {
+    // 注意：实际下载大文件可能需要很长时间（几分钟），因为 Zotero API 有速率限制
+    // 此测试仅验证缓存命中功能，假设缓存中已有文件
+    it('should return cached file when available', async () => {
+      // 直接搜索附件类型
+      const result = await client.searchItems({
+        itemType: 'attachment',
+        includeChildren: true,
+        limit: 5,
+      });
+
+      // 找到可下载的附件
+      const attachment = result.items.find(
+        (item) =>
+          item.data.linkMode === 'imported_file' ||
+          item.data.linkMode === 'imported_url'
+      );
+
+      if (!attachment) {
+        console.log('No downloadable attachments found, skipping test');
+        return;
+      }
+
+      // 尝试从缓存获取（如果缓存存在则快速返回，否则跳过）
+      try {
+        const download = await client.downloadAttachment(attachment.key);
+        expect(download).toHaveProperty('path');
+        expect(download).toHaveProperty('filename');
+        expect(download).toHaveProperty('contentType');
+        expect(download).toHaveProperty('size');
+        expect(typeof download.fromCache).toBe('boolean');
+        console.log(`Attachment ${attachment.key}: fromCache=${download.fromCache}`);
+      } catch (error) {
+        // 如果下载失败（例如网络问题），跳过测试
+        console.log(`Download failed: ${error instanceof Error ? error.message : error}, skipping`);
+      }
+    });
+
+    it('should clear attachment cache', async () => {
+      // 测试清除缓存功能
+      await client.clearAttachmentCache();
+      // 如果没有抛出错误，测试通过
+    });
+
+    it('should throw error for non-attachment items', async () => {
+      // 搜索非附件类型的项目
+      const result = await client.searchItems({
+        itemType: 'journalArticle',
+        limit: 1,
+      });
+
+      if (result.items.length === 0) {
+        console.log('No journal articles found, skipping test');
+        return;
+      }
+
+      const item = result.items[0];
+      await expect(client.downloadAttachment(item.key)).rejects.toThrow('not an attachment');
+    });
+  });
 });

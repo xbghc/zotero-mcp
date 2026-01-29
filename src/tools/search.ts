@@ -32,14 +32,17 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
   // search_items - 搜索文献
   server.tool(
     'search_items',
-    'Search items in the Zotero library',
+    'Search items in the Zotero library. Use qmode=everything to search notes and fulltext content.',
     {
       query: z.string().optional().describe('Search keywords'),
-      itemType: z.string().optional().describe('Filter by item type (e.g., journalArticle, book)'),
+      itemType: z.string().optional().describe('Filter by item type (e.g., journalArticle, book, note)'),
       tag: z.string().optional().describe('Filter by tag'),
       collectionKey: z.string().optional().describe('Filter by collection key'),
       limit: z.number().min(1).max(100).optional().describe('Number of results (default 25, max 100)'),
       start: z.number().min(0).optional().describe('Pagination offset'),
+      qmode: z.enum(['titleCreatorYear', 'everything']).optional().describe('Search mode: titleCreatorYear (default) or everything (includes notes and fulltext)'),
+      includeChildren: z.boolean().optional().describe('Include child items like notes and attachments (default false)'),
+      includeTrashed: z.boolean().optional().describe('Include items in trash (default false)'),
     },
     async (params) => {
       const result = await zoteroClient.searchItems({
@@ -49,6 +52,9 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
         collectionKey: params.collectionKey,
         limit: params.limit,
         start: params.start,
+        qmode: params.qmode,
+        includeChildren: params.includeChildren,
+        includeTrashed: params.includeTrashed,
       });
 
       const items = result.items.map(formatItemSummary);
@@ -216,6 +222,66 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
                 totalPages: fulltext.totalPages,
                 // 内容
                 content: fulltext.content,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  // get_trash_items - 获取垃圾箱中的文献
+  server.tool(
+    'get_trash_items',
+    'Get items in the trash',
+    {
+      limit: z.number().min(1).max(100).optional().describe('Number of items to return (default 25, max 100)'),
+    },
+    async (params) => {
+      const items = await zoteroClient.getTrashItems(params.limit || 25);
+      const summaries = items.map(formatItemSummary);
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              {
+                count: summaries.length,
+                items: summaries,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    }
+  );
+
+  // get_saved_searches - 获取保存的搜索
+  server.tool(
+    'get_saved_searches',
+    'Get saved searches in the Zotero library',
+    {},
+    async () => {
+      const searches = await zoteroClient.getSavedSearches();
+      const result = searches.map((s) => ({
+        key: s.key,
+        name: s.data.name,
+        conditions: s.data.conditions,
+      }));
+
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(
+              {
+                count: result.length,
+                searches: result,
               },
               null,
               2
