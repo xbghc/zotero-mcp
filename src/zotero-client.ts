@@ -392,14 +392,24 @@ export class ZoteroClient {
   }
 
   /**
-   * 获取文献的全文内容
+   * 获取文献的全文内容（支持分段）
+   * @param itemKey 文献 key
+   * @param offset 起始字符位置（默认 0）
+   * @param limit 返回字符数（默认 10000，最大 50000）
    */
-  async getItemFulltext(itemKey: string): Promise<{
+  async getItemFulltext(
+    itemKey: string,
+    offset: number = 0,
+    limit: number = 10000
+  ): Promise<{
     content: string;
+    offset: number;
+    length: number;
+    totalChars: number;
+    hasMore: boolean;
+    nextOffset: number | null;
     indexedPages?: number;
     totalPages?: number;
-    indexedChars?: number;
-    totalChars?: number;
   } | null> {
     const path = `${this.getLibraryPath()}/items/${itemKey}/fulltext`;
     try {
@@ -410,7 +420,30 @@ export class ZoteroClient {
         indexedChars?: number;
         totalChars?: number;
       }>(path);
-      return data;
+
+      const fullContent = data.content || '';
+      const totalChars = fullContent.length;
+
+      // 确保 limit 在合理范围内
+      const actualLimit = Math.min(Math.max(limit, 1000), 50000);
+
+      // 确保 offset 在有效范围内
+      const actualOffset = Math.min(Math.max(offset, 0), totalChars);
+
+      // 截取内容
+      const slicedContent = fullContent.slice(actualOffset, actualOffset + actualLimit);
+      const hasMore = actualOffset + slicedContent.length < totalChars;
+
+      return {
+        content: slicedContent,
+        offset: actualOffset,
+        length: slicedContent.length,
+        totalChars,
+        hasMore,
+        nextOffset: hasMore ? actualOffset + slicedContent.length : null,
+        indexedPages: data.indexedPages,
+        totalPages: data.totalPages,
+      };
     } catch (error) {
       // 404 表示没有全文内容
       if (error instanceof Error && error.message.includes('404')) {

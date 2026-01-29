@@ -163,15 +163,21 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
     }
   );
 
-  // get_item_fulltext - 获取文献的全文内容
+  // get_item_fulltext - 获取文献的全文内容（支持分段）
   server.tool(
     'get_item_fulltext',
-    'Get the full-text content of an item (usually an attachment)',
+    'Get the full-text content of an item with pagination support for large documents',
     {
       itemKey: z.string().describe('The key of the item (usually an attachment key)'),
+      offset: z.number().min(0).optional().describe('Starting character position (default 0)'),
+      limit: z.number().min(1000).max(50000).optional().describe('Number of characters to return (default 10000, max 50000)'),
     },
     async (params) => {
-      const fulltext = await zoteroClient.getItemFulltext(params.itemKey);
+      const fulltext = await zoteroClient.getItemFulltext(
+        params.itemKey,
+        params.offset || 0,
+        params.limit || 10000
+      );
 
       if (!fulltext) {
         return {
@@ -199,10 +205,16 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
               {
                 success: true,
                 itemKey: params.itemKey,
+                // 分段信息
+                offset: fulltext.offset,
+                length: fulltext.length,
+                totalChars: fulltext.totalChars,
+                hasMore: fulltext.hasMore,
+                nextOffset: fulltext.nextOffset,
+                // 页面信息（PDF）
                 indexedPages: fulltext.indexedPages,
                 totalPages: fulltext.totalPages,
-                indexedChars: fulltext.indexedChars,
-                totalChars: fulltext.totalChars,
+                // 内容
                 content: fulltext.content,
               },
               null,

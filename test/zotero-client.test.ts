@@ -213,7 +213,7 @@ describe('ZoteroClient', () => {
   });
 
   describe('getItemFulltext', () => {
-    it('should return fulltext or null', async () => {
+    it('should return fulltext with pagination info or null', async () => {
       // 先获取一个文献
       const result = await client.searchItems({ limit: 1 });
       if (result.items.length === 0) {
@@ -223,9 +223,32 @@ describe('ZoteroClient', () => {
 
       // 尝试获取全文（可能返回 null）
       const fulltext = await client.getItemFulltext(result.items[0].key);
-      // fulltext 可能是 null 或包含 content 的对象
+      // fulltext 可能是 null 或包含分段信息的对象
       if (fulltext !== null) {
         expect(fulltext).toHaveProperty('content');
+        expect(fulltext).toHaveProperty('offset');
+        expect(fulltext).toHaveProperty('length');
+        expect(fulltext).toHaveProperty('totalChars');
+        expect(fulltext).toHaveProperty('hasMore');
+      }
+    });
+
+    it('should support pagination with offset and limit', async () => {
+      // 先获取一个文献
+      const result = await client.searchItems({ limit: 1 });
+      if (result.items.length === 0) {
+        console.log('No items in library, skipping test');
+        return;
+      }
+
+      // 获取前 1000 个字符
+      const page1 = await client.getItemFulltext(result.items[0].key, 0, 1000);
+      if (page1 !== null && page1.hasMore) {
+        // 获取下一段
+        const page2 = await client.getItemFulltext(result.items[0].key, page1.nextOffset!, 1000);
+        if (page2 !== null) {
+          expect(page2.offset).toBe(page1.nextOffset);
+        }
       }
     });
   });
