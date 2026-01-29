@@ -25,9 +25,20 @@ npm install @xbghc/zotero-mcp
 
 ### 启动 Translation Server（可选，用于 DOI 自动获取）
 
+`create_item_by_identifier` 工具需要 Translation Server 支持。
+
+详细部署指南：[Translation Server 部署文档](docs/translation-server-deployment.md)
+
+**快速启动**（从源码）：
+
 ```bash
-docker run -d -p 1969:1969 zotero/translation-server
+git clone --recurse-submodules https://github.com/zotero/translation-server.git
+cd translation-server
+npm install
+npm start
 ```
+
+服务运行在 `http://localhost:1969`。
 
 ### Claude Code 配置
 
