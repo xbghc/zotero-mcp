@@ -664,7 +664,7 @@ export class ZoteroClient {
    */
   async downloadAttachment(
     itemKey: string,
-    options: { force?: boolean } = {}
+    options: { force?: boolean; maxRetries?: number } = {}
   ): Promise<{
     path: string;
     filename: string;
@@ -672,6 +672,8 @@ export class ZoteroClient {
     size: number;
     fromCache: boolean;
   }> {
+    const maxRetries = options.maxRetries ?? 3;
+
     // 获取附件信息以验证类型和获取版本号
     const item = await this.getItem(itemKey);
 
@@ -710,43 +712,109 @@ export class ZoteroClient {
       }
     }
 
-    // 从 API 下载文件
+    // 从 API 下载文件（支持重试和断点续传）
     const path = `${this.getLibraryPath()}/items/${itemKey}/file`;
     const url = `${ZOTERO_API_BASE}${path}`;
 
-    await this.throttle();
+    let lastError: Error | null = null;
+    let totalSize = 0;
 
-    const response = await fetch(url, {
-      headers: {
-        'Zotero-API-Key': this.config.apiKey,
-        'Zotero-API-Version': '3',
-      },
-    });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        await this.throttle();
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Failed to download attachment (${response.status}): ${errorText}`);
+        // 检查是否有部分下载（断点续传）
+        const downloadedBytes = this.cacheManager.getDownloadedBytes(itemKey, filename);
+        const headers: Record<string, string> = {
+          'Zotero-API-Key': this.config.apiKey,
+          'Zotero-API-Version': '3',
+        };
+
+        // 如果有部分下载且是重试，尝试断点续传
+        if (downloadedBytes > 0 && attempt > 0) {
+          headers['Range'] = `bytes=${downloadedBytes}-`;
+        }
+
+        const response = await fetch(url, { headers });
+
+        // 206 表示断点续传成功，200 表示完整下载
+        if (!response.ok && response.status !== 206) {
+          const errorText = await response.text();
+          throw new Error(`Failed to download attachment (${response.status}): ${errorText}`);
+        }
+
+        const isPartial = response.status === 206;
+        const contentLength = response.headers.get('content-length');
+        totalSize = isPartial
+          ? downloadedBytes + parseInt(contentLength || '0', 10)
+          : parseInt(contentLength || '0', 10);
+
+        // 使用流式下载
+        if (response.body) {
+          const { Readable } = await import('stream');
+          const nodeStream = Readable.fromWeb(response.body as import('stream/web').ReadableStream);
+
+          const savedPath = await this.cacheManager.saveFromStream(
+            itemKey,
+            filename,
+            nodeStream,
+            {
+              version,
+              filename,
+              contentType,
+              size: totalSize,
+            },
+            { append: isPartial }
+          );
+
+          return {
+            path: savedPath,
+            filename,
+            contentType,
+            size: totalSize,
+            fromCache: false,
+          };
+        } else {
+          // 回退到一次性下载（如果流不可用）
+          const arrayBuffer = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuffer);
+          totalSize = buffer.length;
+
+          const savedPath = await this.cacheManager.save(itemKey, filename, buffer, {
+            version,
+            filename,
+            contentType,
+            size: buffer.length,
+          });
+
+          return {
+            path: savedPath,
+            filename,
+            contentType,
+            size: buffer.length,
+            fromCache: false,
+          };
+        }
+      } catch (error) {
+        lastError = error as Error;
+
+        // 如果是最后一次尝试，不再重试
+        if (attempt === maxRetries - 1) {
+          break;
+        }
+
+        // 指数退避：1秒, 2秒, 4秒...
+        const backoffTime = Math.pow(2, attempt) * 1000;
+        await new Promise((resolve) => setTimeout(resolve, backoffTime));
+      }
     }
 
-    // 获取文件内容
-    const arrayBuffer = await response.arrayBuffer();
-    const buffer = Buffer.from(arrayBuffer);
+    // 清理临时文件
+    await this.cacheManager.cleanupTemp(itemKey, filename);
 
-    // 保存到缓存
-    const savedPath = await this.cacheManager.save(itemKey, filename, buffer, {
-      version,
-      filename,
-      contentType,
-      size: buffer.length,
-    });
-
-    return {
-      path: savedPath,
-      filename,
-      contentType,
-      size: buffer.length,
-      fromCache: false,
-    };
+    throw new Error(
+      `Failed to download attachment after ${maxRetries} attempts: ${lastError?.message}`
+    );
   }
 
   /**

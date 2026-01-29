@@ -5,7 +5,9 @@
 
 import { homedir, tmpdir, platform } from 'os';
 import { join, dirname } from 'path';
-import { mkdir, readFile, writeFile, stat, rm } from 'fs/promises';
+import { mkdir, readFile, writeFile, stat, rm, appendFile } from 'fs/promises';
+import { createWriteStream, existsSync, statSync } from 'fs';
+import type { Readable } from 'stream';
 
 export interface CacheMeta {
   version: number;
@@ -164,6 +166,83 @@ export class CacheManager {
       await rm(filesDir, { recursive: true });
     } catch {
       // 忽略不存在的目录
+    }
+  }
+
+  /**
+   * 获取临时下载文件路径（用于断点续传）
+   */
+  getTempFilePath(itemKey: string, filename: string): string {
+    return join(this.getItemCacheDir(itemKey), `${filename}.downloading`);
+  }
+
+  /**
+   * 获取已下载的字节数（用于断点续传）
+   */
+  getDownloadedBytes(itemKey: string, filename: string): number {
+    const tempPath = this.getTempFilePath(itemKey, filename);
+    try {
+      if (existsSync(tempPath)) {
+        return statSync(tempPath).size;
+      }
+    } catch {
+      // 忽略错误
+    }
+    return 0;
+  }
+
+  /**
+   * 流式保存文件（支持断点续传）
+   */
+  async saveFromStream(
+    itemKey: string,
+    filename: string,
+    stream: Readable,
+    meta: Omit<CacheMeta, 'downloadedAt'>,
+    options: { append?: boolean } = {}
+  ): Promise<string> {
+    const itemDir = this.getItemCacheDir(itemKey);
+    await mkdir(itemDir, { recursive: true });
+
+    const tempPath = this.getTempFilePath(itemKey, filename);
+    const finalPath = join(itemDir, filename);
+
+    // 创建写入流
+    const writeStream = createWriteStream(tempPath, {
+      flags: options.append ? 'a' : 'w',
+    });
+
+    // 使用 Promise 包装流式写入
+    await new Promise<void>((resolve, reject) => {
+      stream.pipe(writeStream);
+      stream.on('error', reject);
+      writeStream.on('error', reject);
+      writeStream.on('finish', resolve);
+    });
+
+    // 下载完成，重命名为最终文件
+    const { rename } = await import('fs/promises');
+    await rename(tempPath, finalPath);
+
+    // 保存元数据
+    const fullMeta: CacheMeta = {
+      ...meta,
+      downloadedAt: new Date().toISOString(),
+    };
+    await writeFile(this.getMetaPath(itemKey), JSON.stringify(fullMeta, null, 2));
+
+    return finalPath;
+  }
+
+  /**
+   * 清理临时下载文件
+   */
+  async cleanupTemp(itemKey: string, filename: string): Promise<void> {
+    const tempPath = this.getTempFilePath(itemKey, filename);
+    try {
+      await rm(tempPath);
+    } catch {
+      // 忽略不存在的文件
     }
   }
 }
