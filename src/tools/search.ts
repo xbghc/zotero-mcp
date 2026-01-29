@@ -30,119 +30,102 @@ function formatItemSummary(item: { key: string; data: { title?: string; itemType
  */
 export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClient): void {
   // search_items - 搜索文献
-  server.tool(
+  server.registerTool(
     'search_items',
-    'Search items in the Zotero library. Use qmode=everything to search notes and fulltext content.',
     {
-      query: z.string().optional().describe('Search keywords'),
-      itemType: z.string().optional().describe('Filter by item type (e.g., journalArticle, book, note)'),
-      tag: z.string().optional().describe('Filter by tag'),
-      collectionKey: z.string().optional().describe('Filter by collection key'),
-      limit: z.number().min(1).max(100).optional().describe('Number of results (default 25, max 100)'),
-      start: z.number().min(0).optional().describe('Pagination offset'),
-      qmode: z.enum(['titleCreatorYear', 'everything']).optional().describe('Search mode: titleCreatorYear (default) or everything (includes notes and fulltext)'),
-      includeChildren: z.boolean().optional().describe('Include child items like notes and attachments (default false)'),
-      includeTrashed: z.boolean().optional().describe('Include items in trash (default false)'),
+      title: 'Search Items',
+      description: `Search items in the Zotero library.
+- Use 'query' for keyword search
+- Use 'qmode=everything' to search within notes and full-text content (PDF text)
+- Use 'itemType=note' with 'includeChildren=true' to find only notes
+- Use 'includeTrashed=true' to include items in trash
+- Returns: list of items with key, title, itemType, creators, date`,
+      inputSchema: {
+        query: z.string().optional().describe('Search keywords'),
+        itemType: z.string().optional().describe('Filter by item type: journalArticle, book, note, attachment, etc.'),
+        tag: z.string().optional().describe('Filter by tag name'),
+        collectionKey: z.string().optional().describe('Filter by collection key'),
+        limit: z.number().min(1).max(100).optional().describe('Number of results (default 25, max 100)'),
+        start: z.number().min(0).optional().describe('Pagination offset for fetching more results'),
+        qmode: z.enum(['titleCreatorYear', 'everything']).optional().describe('Search mode: titleCreatorYear (default, fast) or everything (searches notes and fulltext, slower)'),
+        includeChildren: z.boolean().optional().describe('Include child items like notes and attachments in results'),
+        includeTrashed: z.boolean().optional().describe('Include items in trash'),
+      },
     },
-    async (params) => {
+    async ({ query, itemType, tag, collectionKey, limit, start, qmode, includeChildren, includeTrashed }) => {
       const result = await zoteroClient.searchItems({
-        query: params.query,
-        itemType: params.itemType,
-        tag: params.tag,
-        collectionKey: params.collectionKey,
-        limit: params.limit,
-        start: params.start,
-        qmode: params.qmode,
-        includeChildren: params.includeChildren,
-        includeTrashed: params.includeTrashed,
+        query, itemType, tag, collectionKey, limit, start, qmode, includeChildren, includeTrashed,
       });
 
       const items = result.items.map(formatItemSummary);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                totalResults: result.totalResults,
-                returned: items.length,
-                items,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ totalResults: result.totalResults, returned: items.length, items }, null, 2) }],
       };
     }
   );
 
   // get_item - 获取文献详情
-  server.tool(
+  server.registerTool(
     'get_item',
-    'Get detailed metadata of a single item',
     {
-      itemKey: z.string().describe('The unique key of the item'),
+      title: 'Get Item Details',
+      description: `Get complete metadata of a single item by its key.
+Returns all fields: title, creators, abstract, DOI, URL, tags, collections, etc.
+Use this after search_items to get full details of a specific item.`,
+      inputSchema: {
+        itemKey: z.string().describe('The unique key of the item (e.g., "ABC12345")'),
+      },
     },
-    async (params) => {
-      const item = await zoteroClient.getItem(params.itemKey);
-
+    async ({ itemKey }) => {
+      const item = await zoteroClient.getItem(itemKey);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(item.data, null, 2),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(item.data, null, 2) }],
       };
     }
   );
 
   // get_recent_items - 获取最近添加的文献
-  server.tool(
+  server.registerTool(
     'get_recent_items',
-    'Get recently added items in the Zotero library',
     {
-      limit: z.number().min(1).max(50).optional().describe('Number of items to return (default 10, max 50)'),
+      title: 'Get Recent Items',
+      description: `Get the most recently added items in the Zotero library.
+Useful for checking what was recently imported or created.
+Returns items sorted by dateAdded in descending order.`,
+      inputSchema: {
+        limit: z.number().min(1).max(50).optional().describe('Number of items to return (default 10, max 50)'),
+      },
     },
-    async (params) => {
-      const items = await zoteroClient.getRecentItems(params.limit || 10);
+    async ({ limit }) => {
+      const items = await zoteroClient.getRecentItems(limit || 10);
       const summaries = items.map(formatItemSummary);
-
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                count: summaries.length,
-                items: summaries,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ count: summaries.length, items: summaries }, null, 2) }],
       };
     }
   );
 
   // get_item_children - 获取文献的子项目（附件、笔记）
-  server.tool(
+  server.registerTool(
     'get_item_children',
-    'Get child items (attachments, notes) of a parent item',
     {
-      itemKey: z.string().describe('The key of the parent item'),
+      title: 'Get Item Children',
+      description: `Get child items (attachments, notes) of a parent item.
+- Attachments include: PDF files, snapshots, linked files
+- Notes include: user-created notes attached to the item
+Use the returned attachment key with download_attachment to get the file.`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the parent item'),
+      },
     },
-    async (params) => {
-      const children = await zoteroClient.getItemChildren(params.itemKey);
+    async ({ itemKey }) => {
+      const children = await zoteroClient.getItemChildren(itemKey);
 
       const result = children.map((child) => ({
         key: child.key,
         itemType: child.data.itemType,
         title: child.data.title || child.data.note?.substring(0, 100) || '(No title)',
-        // 附件特有字段
         ...(child.data.itemType === 'attachment' && {
           linkMode: child.data.linkMode,
           contentType: child.data.contentType,
@@ -151,121 +134,77 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
       }));
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                parentKey: params.itemKey,
-                count: result.length,
-                children: result,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ parentKey: itemKey, count: result.length, children: result }, null, 2) }],
       };
     }
   );
 
   // get_item_fulltext - 获取文献的全文内容（支持分段）
-  server.tool(
+  server.registerTool(
     'get_item_fulltext',
-    'Get the full-text content of an item with pagination support for large documents',
     {
-      itemKey: z.string().describe('The key of the item (usually an attachment key)'),
-      offset: z.number().min(0).optional().describe('Starting character position (default 0)'),
-      limit: z.number().min(1000).max(50000).optional().describe('Number of characters to return (default 10000, max 50000)'),
+      title: 'Get Item Fulltext',
+      description: `Get the full-text content of an item (usually a PDF attachment).
+- Supports pagination for large documents using offset and limit
+- Use 'hasMore' and 'nextOffset' in response to fetch remaining content
+- Returns indexed text extracted from PDF, not the original PDF file
+- If you need the actual PDF file, use download_attachment instead`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the attachment item (get it from get_item_children)'),
+        offset: z.number().min(0).optional().describe('Starting character position (default 0)'),
+        limit: z.number().min(1000).max(50000).optional().describe('Number of characters to return (default 10000, max 50000)'),
+      },
     },
-    async (params) => {
-      const fulltext = await zoteroClient.getItemFulltext(
-        params.itemKey,
-        params.offset || 0,
-        params.limit || 10000
-      );
+    async ({ itemKey, offset, limit }) => {
+      const fulltext = await zoteroClient.getItemFulltext(itemKey, offset || 0, limit || 10000);
 
       if (!fulltext) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  message: 'No full-text content available for this item',
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, message: 'No full-text content available for this item' }, null, 2) }],
         };
       }
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey: params.itemKey,
-                // 分段信息
-                offset: fulltext.offset,
-                length: fulltext.length,
-                totalChars: fulltext.totalChars,
-                hasMore: fulltext.hasMore,
-                nextOffset: fulltext.nextOffset,
-                // 页面信息（PDF）
-                indexedPages: fulltext.indexedPages,
-                totalPages: fulltext.totalPages,
-                // 内容
-                content: fulltext.content,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({
+          success: true, itemKey,
+          offset: fulltext.offset, length: fulltext.length, totalChars: fulltext.totalChars,
+          hasMore: fulltext.hasMore, nextOffset: fulltext.nextOffset,
+          indexedPages: fulltext.indexedPages, totalPages: fulltext.totalPages,
+          content: fulltext.content,
+        }, null, 2) }],
       };
     }
   );
 
   // get_trash_items - 获取垃圾箱中的文献
-  server.tool(
+  server.registerTool(
     'get_trash_items',
-    'Get items in the trash',
     {
-      limit: z.number().min(1).max(100).optional().describe('Number of items to return (default 25, max 100)'),
+      title: 'Get Trash Items',
+      description: `Get items that have been moved to trash.
+Items in trash can be restored or permanently deleted from Zotero client.`,
+      inputSchema: {
+        limit: z.number().min(1).max(100).optional().describe('Number of items to return (default 25, max 100)'),
+      },
     },
-    async (params) => {
-      const items = await zoteroClient.getTrashItems(params.limit || 25);
+    async ({ limit }) => {
+      const items = await zoteroClient.getTrashItems(limit || 25);
       const summaries = items.map(formatItemSummary);
-
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                count: summaries.length,
-                items: summaries,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ count: summaries.length, items: summaries }, null, 2) }],
       };
     }
   );
 
   // get_saved_searches - 获取保存的搜索
-  server.tool(
+  server.registerTool(
     'get_saved_searches',
-    'Get saved searches in the Zotero library',
-    {},
+    {
+      title: 'Get Saved Searches',
+      description: `Get saved searches (smart collections) defined in the Zotero library.
+Returns search names and their filter conditions.`,
+      inputSchema: {},
+    },
     async () => {
       const searches = await zoteroClient.getSavedSearches();
       const result = searches.map((s) => ({
@@ -275,19 +214,7 @@ export function registerSearchTools(server: McpServer, zoteroClient: ZoteroClien
       }));
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                count: result.length,
-                searches: result,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ count: result.length, searches: result }, null, 2) }],
       };
     }
   );

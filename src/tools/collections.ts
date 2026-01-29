@@ -12,14 +12,19 @@ import type { CollectionSummary, ItemSummary } from '../types.js';
  */
 export function registerCollectionTools(server: McpServer, zoteroClient: ZoteroClient): void {
   // list_collections - 列出分组
-  server.tool(
+  server.registerTool(
     'list_collections',
-    'List all collections in the Zotero library',
     {
-      parentKey: z.string().optional().describe('Parent collection key to list sub-collections'),
+      title: 'List Collections',
+      description: `List all collections (folders) in the Zotero library.
+Collections help organize items into hierarchical folders.
+Use parentKey to list sub-collections of a specific collection.`,
+      inputSchema: {
+        parentKey: z.string().optional().describe('Parent collection key to list only sub-collections'),
+      },
     },
-    async (params) => {
-      const collections = await zoteroClient.getCollections(params.parentKey);
+    async ({ parentKey }) => {
+      const collections = await zoteroClient.getCollections(parentKey);
 
       const result: CollectionSummary[] = collections.map((c) => ({
         key: c.key,
@@ -28,29 +33,25 @@ export function registerCollectionTools(server: McpServer, zoteroClient: ZoteroC
       }));
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(result, null, 2),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }],
       };
     }
   );
 
   // get_collection_items - 获取分组内文献
-  server.tool(
+  server.registerTool(
     'get_collection_items',
-    'Get items in a specific collection',
     {
-      collectionKey: z.string().describe('The collection key'),
-      limit: z.number().min(1).max(100).optional().describe('Number of results (default 25, max 100)'),
+      title: 'Get Collection Items',
+      description: `Get all items in a specific collection.
+Returns items directly in the collection (not in sub-collections).`,
+      inputSchema: {
+        collectionKey: z.string().describe('The collection key'),
+        limit: z.number().min(1).max(100).optional().describe('Number of results (default 25, max 100)'),
+      },
     },
-    async (params) => {
-      const result = await zoteroClient.searchItems({
-        collectionKey: params.collectionKey,
-        limit: params.limit,
-      });
+    async ({ collectionKey, limit }) => {
+      const result = await zoteroClient.searchItems({ collectionKey, limit });
 
       const items: ItemSummary[] = result.items.map((item) => {
         const creators = item.data.creators || [];
@@ -68,20 +69,79 @@ export function registerCollectionTools(server: McpServer, zoteroClient: ZoteroC
       });
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                totalResults: result.totalResults,
-                returned: items.length,
-                items,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ totalResults: result.totalResults, returned: items.length, items }, null, 2) }],
+      };
+    }
+  );
+
+  // create_collection - 创建分组
+  server.registerTool(
+    'create_collection',
+    {
+      title: 'Create Collection',
+      description: `Create a new collection (folder) in the Zotero library.
+Collections help organize items into hierarchical folders.
+Use parentCollection to create a sub-collection.`,
+      inputSchema: {
+        name: z.string().describe('Name of the new collection'),
+        parentCollection: z.string().optional().describe('Parent collection key to create as sub-collection'),
+      },
+    },
+    async ({ name, parentCollection }) => {
+      const collectionKey = await zoteroClient.createCollection(name, parentCollection);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, collectionKey, name, message: `Collection "${name}" created successfully` }, null, 2) }],
+      };
+    }
+  );
+
+  // update_collection - 更新分组
+  server.registerTool(
+    'update_collection',
+    {
+      title: 'Update Collection',
+      description: `Update a collection's name or parent.
+Set parentCollection to false to move to top level.`,
+      inputSchema: {
+        collectionKey: z.string().describe('The collection key to update'),
+        name: z.string().optional().describe('New name for the collection'),
+        parentCollection: z.union([z.string(), z.literal(false)]).optional().describe('New parent collection key, or false to move to top level'),
+      },
+    },
+    async ({ collectionKey, name, parentCollection }) => {
+      const updates: { name?: string; parentCollection?: string | false } = {};
+      if (name !== undefined) updates.name = name;
+      if (parentCollection !== undefined) updates.parentCollection = parentCollection;
+
+      if (Object.keys(updates).length === 0) {
+        return {
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: 'No fields to update' }, null, 2) }],
+        };
+      }
+
+      await zoteroClient.updateCollection(collectionKey, updates);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, collectionKey, updatedFields: Object.keys(updates), message: `Collection ${collectionKey} updated successfully` }, null, 2) }],
+      };
+    }
+  );
+
+  // delete_collection - 删除分组
+  server.registerTool(
+    'delete_collection',
+    {
+      title: 'Delete Collection',
+      description: `Delete a collection from the library.
+Items in the collection are NOT deleted - they remain in the library.
+Sub-collections are also deleted.`,
+      inputSchema: {
+        collectionKey: z.string().describe('The collection key to delete'),
+      },
+    },
+    async ({ collectionKey }) => {
+      await zoteroClient.deleteCollection(collectionKey);
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, collectionKey, message: `Collection ${collectionKey} deleted successfully` }, null, 2) }],
       };
     }
   );

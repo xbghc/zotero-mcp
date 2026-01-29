@@ -80,6 +80,49 @@ describe('ZoteroClient', () => {
     });
   });
 
+  describe('collection management', () => {
+    let testCollectionKey: string | null = null;
+
+    it('should create a collection', async () => {
+      if (!hasWriteAccess) {
+        console.log('Skipping: No write access');
+        return;
+      }
+
+      const name = `Test Collection ${Date.now()}`;
+      testCollectionKey = await client.createCollection(name);
+      expect(testCollectionKey).toBeTruthy();
+      console.log(`Created collection: ${testCollectionKey}`);
+    });
+
+    it('should update a collection', async () => {
+      if (!hasWriteAccess || !testCollectionKey) {
+        console.log('Skipping: No write access or no test collection');
+        return;
+      }
+
+      const newName = `Updated Collection ${Date.now()}`;
+      await client.updateCollection(testCollectionKey, { name: newName });
+
+      // 验证更新
+      const collection = await client.getCollection(testCollectionKey);
+      expect(collection.data.name).toBe(newName);
+    });
+
+    it('should delete a collection', async () => {
+      if (!hasWriteAccess || !testCollectionKey) {
+        console.log('Skipping: No write access or no test collection');
+        return;
+      }
+
+      await client.deleteCollection(testCollectionKey);
+      testCollectionKey = null;
+
+      // 验证删除（应该抛出 404 错误）
+      // 注意：删除后立即查询可能因为 API 同步延迟而仍然返回
+    });
+  });
+
   describe('getTags', () => {
     it('should return tags', async () => {
       const tags = await client.getTags(10);
@@ -333,16 +376,15 @@ describe('ZoteroClient', () => {
 
   describe('downloadAttachment', () => {
     // 注意：实际下载大文件可能需要很长时间（几分钟），因为 Zotero API 有速率限制
-    // 此测试仅验证缓存命中功能，假设缓存中已有文件
-    it('should return cached file when available', async () => {
-      // 直接搜索附件类型
+    it('should download attachment and verify cache', { timeout: 600000 }, async () => {
+      // 搜索附件
       const result = await client.searchItems({
         itemType: 'attachment',
         includeChildren: true,
-        limit: 5,
+        limit: 10,
       });
 
-      // 找到可下载的附件
+      // 找到可下载的附件（imported_file 或 imported_url）
       const attachment = result.items.find(
         (item) =>
           item.data.linkMode === 'imported_file' ||
@@ -354,25 +396,38 @@ describe('ZoteroClient', () => {
         return;
       }
 
-      // 尝试从缓存获取（如果缓存存在则快速返回，否则跳过）
-      try {
-        const download = await client.downloadAttachment(attachment.key);
-        expect(download).toHaveProperty('path');
-        expect(download).toHaveProperty('filename');
-        expect(download).toHaveProperty('contentType');
-        expect(download).toHaveProperty('size');
-        expect(typeof download.fromCache).toBe('boolean');
-        console.log(`Attachment ${attachment.key}: fromCache=${download.fromCache}`);
-      } catch (error) {
-        // 如果下载失败（例如网络问题），跳过测试
-        console.log(`Download failed: ${error instanceof Error ? error.message : error}, skipping`);
-      }
+      console.log(`Testing download for attachment: ${attachment.key}`);
+      console.log(`Filename: ${attachment.data.filename}`);
+
+      // 清除可能存在的缓存
+      await client.clearAttachmentCache(attachment.key);
+
+      // 首次下载
+      console.log('Starting first download (may take several minutes)...');
+      const startTime = Date.now();
+      const download1 = await client.downloadAttachment(attachment.key);
+      const downloadTime = Date.now() - startTime;
+      console.log(`First download completed in ${downloadTime}ms, fromCache: ${download1.fromCache}`);
+
+      expect(download1).toHaveProperty('path');
+      expect(download1).toHaveProperty('filename');
+      expect(download1).toHaveProperty('size');
+      expect(download1.fromCache).toBe(false);
+
+      // 第二次应该从缓存获取
+      console.log('Starting second download (should be from cache)...');
+      const download2 = await client.downloadAttachment(attachment.key);
+      console.log(`Second download fromCache: ${download2.fromCache}`);
+
+      expect(download2.path).toBe(download1.path);
+      expect(download2.fromCache).toBe(true);
+
+      // 清理
+      await client.clearAttachmentCache(attachment.key);
     });
 
     it('should clear attachment cache', async () => {
-      // 测试清除缓存功能
       await client.clearAttachmentCache();
-      // 如果没有抛出错误，测试通过
     });
 
     it('should throw error for non-attachment items', async () => {

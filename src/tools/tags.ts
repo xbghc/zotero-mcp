@@ -11,22 +11,21 @@ import type { ZoteroClient } from '../zotero-client.js';
  */
 export function registerTagTools(server: McpServer, zoteroClient: ZoteroClient): void {
   // list_tags - 列出标签
-  server.tool(
+  server.registerTool(
     'list_tags',
-    'List all tags in the Zotero library',
     {
-      limit: z.number().min(1).max(100).optional().describe('Number of tags to return (default 50)'),
+      title: 'List Tags',
+      description: `List all tags used in the Zotero library.
+Tags can be used with search_items to filter items.
+Type 0 = user-created tags, Type 1 = automatic tags.`,
+      inputSchema: {
+        limit: z.number().min(1).max(100).optional().describe('Number of tags to return (default 50)'),
+      },
     },
-    async (params) => {
-      const tags = await zoteroClient.getTags(params.limit || 50);
-
+    async ({ limit }) => {
+      const tags = await zoteroClient.getTags(limit || 50);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(tags, null, 2),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify(tags, null, 2) }],
       };
     }
   );

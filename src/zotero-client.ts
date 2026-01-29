@@ -246,6 +246,123 @@ export class ZoteroClient {
   }
 
   /**
+   * 获取单个分组详情
+   */
+  async getCollection(collectionKey: string): Promise<ZoteroCollection> {
+    const path = `${this.getLibraryPath()}/collections/${collectionKey}`;
+    const { data } = await this.request<ZoteroCollection>(path);
+    return data;
+  }
+
+  /**
+   * 创建分组
+   */
+  async createCollection(name: string, parentCollection?: string): Promise<string> {
+    await this.getLibraryVersion();
+
+    const path = `${this.getLibraryPath()}/collections`;
+    const collectionData: { name: string; parentCollection?: string | false } = { name };
+    if (parentCollection) {
+      collectionData.parentCollection = parentCollection;
+    }
+
+    const { data } = await this.request<ZoteroWriteResponse>(path, {
+      method: 'POST',
+      body: [collectionData],
+      requireVersion: true,
+    });
+
+    if (Object.keys(data.success).length > 0) {
+      return data.success['0'];
+    }
+
+    if (Object.keys(data.failed).length > 0) {
+      const error = data.failed['0'];
+      throw new Error(`Failed to create collection: ${error.message}`);
+    }
+
+    throw new Error('Unknown error creating collection');
+  }
+
+  /**
+   * 更新分组
+   */
+  async updateCollection(
+    collectionKey: string,
+    updates: { name?: string; parentCollection?: string | false }
+  ): Promise<void> {
+    // 获取当前分组以获取版本号
+    const collection = await this.getCollection(collectionKey);
+    const currentVersion = collection.version;
+
+    const path = `${this.getLibraryPath()}/collections/${collectionKey}`;
+    const url = new URL(`${ZOTERO_API_BASE}${path}`);
+    const headers: Record<string, string> = {
+      'Zotero-API-Key': this.config.apiKey,
+      'Zotero-API-Version': '3',
+      'Content-Type': 'application/json',
+      'If-Unmodified-Since-Version': String(currentVersion),
+    };
+
+    const body = {
+      key: collectionKey,
+      version: currentVersion,
+      name: updates.name ?? collection.data.name,
+      parentCollection: updates.parentCollection ?? collection.data.parentCollection,
+    };
+
+    await this.throttle();
+    const response = await fetch(url.toString(), {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Zotero API error (${response.status}): ${errorText}`);
+    }
+
+    const newVersion = response.headers.get('Last-Modified-Version');
+    if (newVersion) {
+      this.libraryVersion = parseInt(newVersion, 10);
+    }
+  }
+
+  /**
+   * 删除分组
+   */
+  async deleteCollection(collectionKey: string): Promise<void> {
+    // 获取当前分组以获取版本号
+    const collection = await this.getCollection(collectionKey);
+    const currentVersion = collection.version;
+
+    const path = `${this.getLibraryPath()}/collections/${collectionKey}`;
+    const url = new URL(`${ZOTERO_API_BASE}${path}`);
+    const headers: Record<string, string> = {
+      'Zotero-API-Key': this.config.apiKey,
+      'Zotero-API-Version': '3',
+      'If-Unmodified-Since-Version': String(currentVersion),
+    };
+
+    await this.throttle();
+    const response = await fetch(url.toString(), {
+      method: 'DELETE',
+      headers,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Zotero API error (${response.status}): ${errorText}`);
+    }
+
+    const newVersion = response.headers.get('Last-Modified-Version');
+    if (newVersion) {
+      this.libraryVersion = parseInt(newVersion, 10);
+    }
+  }
+
+  /**
    * 获取所有标签
    */
   async getTags(limit: number = 50): Promise<TagSummary[]> {

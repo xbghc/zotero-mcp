@@ -25,43 +25,39 @@ export function registerCreateTools(
   translationClient: TranslationClient
 ): void {
   // create_item - 手动创建文献
-  server.tool(
+  server.registerTool(
     'create_item',
-    'Create a new item in the Zotero library manually',
     {
-      itemType: z.string().describe('Item type (e.g., journalArticle, book, webpage)'),
-      title: z.string().describe('Title of the item'),
-      creators: z.array(creatorSchema).optional().describe('List of creators'),
-      date: z.string().optional().describe('Publication date'),
-      DOI: z.string().optional().describe('DOI'),
-      url: z.string().optional().describe('URL'),
-      abstractNote: z.string().optional().describe('Abstract'),
-      publicationTitle: z.string().optional().describe('Journal or publication name'),
-      volume: z.string().optional().describe('Volume number'),
-      issue: z.string().optional().describe('Issue number'),
-      pages: z.string().optional().describe('Page range'),
-      tags: z.array(z.string()).optional().describe('Tags to add'),
-      collections: z.array(z.string()).optional().describe('Collection keys to add to'),
+      title: 'Create Item',
+      description: `Create a new item in the Zotero library with manual metadata entry.
+Common item types: journalArticle, book, bookSection, conferencePaper, webpage, thesis.
+For journal articles, use create_item_by_identifier with DOI instead - it's faster and more accurate.`,
+      inputSchema: {
+        itemType: z.string().describe('Item type: journalArticle, book, bookSection, conferencePaper, webpage, thesis, etc.'),
+        title: z.string().describe('Title of the item'),
+        creators: z.array(creatorSchema).optional().describe('List of creators (authors, editors, etc.)'),
+        date: z.string().optional().describe('Publication date (YYYY or YYYY-MM-DD)'),
+        DOI: z.string().optional().describe('DOI'),
+        url: z.string().optional().describe('URL'),
+        abstractNote: z.string().optional().describe('Abstract'),
+        publicationTitle: z.string().optional().describe('Journal name or book title'),
+        volume: z.string().optional().describe('Volume number'),
+        issue: z.string().optional().describe('Issue number'),
+        pages: z.string().optional().describe('Page range (e.g., "1-10")'),
+        tags: z.array(z.string()).optional().describe('Tags to add'),
+        collections: z.array(z.string()).optional().describe('Collection keys to add the item to'),
+      },
     },
-    async (params) => {
-      // 获取项目模板
-      const template = await zoteroClient.getItemTemplate(params.itemType);
+    async ({ itemType, title, creators, date, DOI, url, abstractNote, publicationTitle, volume, issue, pages, tags, collections }) => {
+      const template = await zoteroClient.getItemTemplate(itemType);
 
-      // 填充数据
       const itemData: ZoteroItemData = {
         ...template,
-        title: params.title,
-        creators: params.creators as ZoteroCreator[] | undefined,
-        date: params.date,
-        DOI: params.DOI,
-        url: params.url,
-        abstractNote: params.abstractNote,
-        publicationTitle: params.publicationTitle,
-        volume: params.volume,
-        issue: params.issue,
-        pages: params.pages,
-        tags: params.tags?.map((tag) => ({ tag })),
-        collections: params.collections,
+        title,
+        creators: creators as ZoteroCreator[] | undefined,
+        date, DOI, url, abstractNote, publicationTitle, volume, issue, pages,
+        tags: tags?.map((tag) => ({ tag })),
+        collections,
       };
 
       // 移除 undefined 值
@@ -74,91 +70,50 @@ export function registerCreateTools(
       const itemKey = await zoteroClient.createItem(itemData);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey,
-                message: `Item created successfully with key: ${itemKey}`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, message: `Item created successfully with key: ${itemKey}` }, null, 2) }],
       };
     }
   );
 
   // create_item_by_identifier - 通过标识符创建文献
-  server.tool(
+  server.registerTool(
     'create_item_by_identifier',
-    'Create a new item by DOI, ISBN, PMID, or arXiv ID (requires Translation Server)',
     {
-      identifier: z.string().describe('DOI, ISBN, PMID, or arXiv ID'),
-      tags: z.array(z.string()).optional().describe('Additional tags to add'),
-      collections: z.array(z.string()).optional().describe('Collection keys to add to'),
+      title: 'Create Item by Identifier',
+      description: `Create a new item by looking up metadata from DOI, ISBN, PMID, or arXiv ID.
+This is the preferred way to add published papers - metadata is fetched automatically.
+Requires Translation Server to be running (see README for setup).
+Examples: "10.1038/nature12373" (DOI), "978-0-13-468599-1" (ISBN), "PMID:12345678", "arXiv:2301.00001"`,
+      inputSchema: {
+        identifier: z.string().describe('DOI, ISBN, PMID, or arXiv ID'),
+        tags: z.array(z.string()).optional().describe('Tags to add to the created item'),
+        collections: z.array(z.string()).optional().describe('Collection keys to add the item to'),
+      },
     },
-    async (params) => {
-      // 通过 Translation Server 获取元数据
-      const items = await translationClient.search(params.identifier);
+    async ({ identifier, tags, collections }) => {
+      const items = await translationClient.search(identifier);
 
       if (!items || items.length === 0) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  error: `No metadata found for identifier: ${params.identifier}`,
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: `No metadata found for identifier: ${identifier}` }, null, 2) }],
         };
       }
 
-      // 使用第一个结果
       const itemData = items[0];
 
-      // 添加额外的标签
-      if (params.tags && params.tags.length > 0) {
+      if (tags && tags.length > 0) {
         const existingTags = itemData.tags || [];
-        itemData.tags = [
-          ...existingTags,
-          ...params.tags.map((tag) => ({ tag })),
-        ];
+        itemData.tags = [...existingTags, ...tags.map((tag) => ({ tag }))];
       }
 
-      // 添加到分组
-      if (params.collections && params.collections.length > 0) {
-        itemData.collections = params.collections;
+      if (collections && collections.length > 0) {
+        itemData.collections = collections;
       }
 
       const itemKey = await zoteroClient.createItem(itemData);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey,
-                title: itemData.title,
-                itemType: itemData.itemType,
-                message: `Item created successfully from ${params.identifier}`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, title: itemData.title, itemType: itemData.itemType, message: `Item created successfully from ${identifier}` }, null, 2) }],
       };
     }
   );

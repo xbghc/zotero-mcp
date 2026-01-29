@@ -14,25 +14,27 @@ export function registerManageTools(
   zoteroClient: ZoteroClient
 ): void {
   // update_item - 更新文献
-  server.tool(
+  server.registerTool(
     'update_item',
-    'Update an existing item in the Zotero library',
     {
-      itemKey: z.string().describe('The key of the item to update'),
-      title: z.string().optional().describe('New title'),
-      date: z.string().optional().describe('New publication date'),
-      DOI: z.string().optional().describe('New DOI'),
-      url: z.string().optional().describe('New URL'),
-      abstractNote: z.string().optional().describe('New abstract'),
-      publicationTitle: z.string().optional().describe('New journal or publication name'),
-      volume: z.string().optional().describe('New volume number'),
-      issue: z.string().optional().describe('New issue number'),
-      pages: z.string().optional().describe('New page range'),
+      title: 'Update Item',
+      description: `Update metadata fields of an existing item.
+Only provide fields you want to change - other fields remain unchanged.
+Common fields: title, date, DOI, url, abstractNote, publicationTitle, volume, issue, pages.`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the item to update'),
+        title: z.string().optional().describe('New title'),
+        date: z.string().optional().describe('New publication date'),
+        DOI: z.string().optional().describe('New DOI'),
+        url: z.string().optional().describe('New URL'),
+        abstractNote: z.string().optional().describe('New abstract'),
+        publicationTitle: z.string().optional().describe('New journal or publication name'),
+        volume: z.string().optional().describe('New volume number'),
+        issue: z.string().optional().describe('New issue number'),
+        pages: z.string().optional().describe('New page range'),
+      },
     },
-    async (params) => {
-      const { itemKey, ...updates } = params;
-
-      // 移除 undefined 值
+    async ({ itemKey, ...updates }) => {
       const cleanUpdates: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(updates)) {
         if (value !== undefined) {
@@ -42,237 +44,141 @@ export function registerManageTools(
 
       if (Object.keys(cleanUpdates).length === 0) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  error: 'No fields to update',
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: 'No fields to update' }, null, 2) }],
         };
       }
 
       await zoteroClient.updateItem(itemKey, cleanUpdates);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey,
-                updatedFields: Object.keys(cleanUpdates),
-                message: `Item ${itemKey} updated successfully`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, updatedFields: Object.keys(cleanUpdates), message: `Item ${itemKey} updated successfully` }, null, 2) }],
       };
     }
   );
 
   // delete_item - 删除文献
-  server.tool(
+  server.registerTool(
     'delete_item',
-    'Delete an item from the Zotero library (moves to trash)',
     {
-      itemKey: z.string().describe('The key of the item to delete'),
+      title: 'Delete Item',
+      description: `Move an item to trash (does not permanently delete).
+The item can be restored from trash in the Zotero client.
+To permanently delete, user must empty trash in Zotero.`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the item to delete'),
+      },
     },
-    async (params) => {
-      await zoteroClient.deleteItem(params.itemKey);
-
+    async ({ itemKey }) => {
+      await zoteroClient.deleteItem(itemKey);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey: params.itemKey,
-                message: `Item ${params.itemKey} moved to trash`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, message: `Item ${itemKey} moved to trash` }, null, 2) }],
       };
     }
   );
 
   // add_tags_to_item - 为文献添加标签
-  server.tool(
+  server.registerTool(
     'add_tags_to_item',
-    'Add tags to an existing item in the Zotero library',
     {
-      itemKey: z.string().describe('The key of the item'),
-      tags: z.array(z.string()).describe('Tags to add'),
+      title: 'Add Tags to Item',
+      description: `Add one or more tags to an existing item.
+Tags are useful for organizing and filtering items.
+Duplicate tags are automatically ignored.`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the item'),
+        tags: z.array(z.string()).describe('List of tags to add'),
+      },
     },
-    async (params) => {
-      if (params.tags.length === 0) {
+    async ({ itemKey, tags }) => {
+      if (tags.length === 0) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  error: 'No tags provided',
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, error: 'No tags provided' }, null, 2) }],
         };
       }
 
-      await zoteroClient.addTagsToItem(params.itemKey, params.tags);
+      await zoteroClient.addTagsToItem(itemKey, tags);
 
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey: params.itemKey,
-                addedTags: params.tags,
-                message: `Tags added to item ${params.itemKey}`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, addedTags: tags, message: `Tags added to item ${itemKey}` }, null, 2) }],
       };
     }
   );
 
   // add_item_to_collection - 将文献添加到分组
-  server.tool(
+  server.registerTool(
     'add_item_to_collection',
-    'Add an item to a collection in the Zotero library',
     {
-      itemKey: z.string().describe('The key of the item'),
-      collectionKey: z.string().describe('The key of the collection'),
+      title: 'Add Item to Collection',
+      description: `Add an item to a collection (folder).
+An item can belong to multiple collections.
+Use list_collections to get available collection keys.`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the item'),
+        collectionKey: z.string().describe('The key of the collection'),
+      },
     },
-    async (params) => {
-      await zoteroClient.addItemToCollection(params.itemKey, params.collectionKey);
-
+    async ({ itemKey, collectionKey }) => {
+      await zoteroClient.addItemToCollection(itemKey, collectionKey);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                itemKey: params.itemKey,
-                collectionKey: params.collectionKey,
-                message: `Item ${params.itemKey} added to collection ${params.collectionKey}`,
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, itemKey, collectionKey, message: `Item ${itemKey} added to collection ${collectionKey}` }, null, 2) }],
       };
     }
   );
 
   // download_attachment - 下载附件文件
-  server.tool(
+  server.registerTool(
     'download_attachment',
-    'Download an attachment file to local cache. Returns the local file path.',
     {
-      itemKey: z.string().describe('The key of the attachment item'),
-      force: z.boolean().optional().describe('Force re-download even if cached (default false)'),
+      title: 'Download Attachment',
+      description: `Download an attachment file (PDF, etc.) to local cache.
+- Only works for stored attachments (imported_file, imported_url)
+- Files are cached locally - subsequent calls return cached version
+- Use force=true to re-download and update cache
+- Returns the local file path for further processing`,
+      inputSchema: {
+        itemKey: z.string().describe('The key of the attachment item (get from get_item_children)'),
+        force: z.boolean().optional().describe('Force re-download even if cached'),
+      },
     },
-    async (params) => {
+    async ({ itemKey, force }) => {
       try {
-        const result = await zoteroClient.downloadAttachment(params.itemKey, {
-          force: params.force,
-        });
+        const result = await zoteroClient.downloadAttachment(itemKey, { force });
 
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: true,
-                  itemKey: params.itemKey,
-                  path: result.path,
-                  filename: result.filename,
-                  contentType: result.contentType,
-                  size: result.size,
-                  fromCache: result.fromCache,
-                  message: result.fromCache
-                    ? `File retrieved from cache: ${result.path}`
-                    : `File downloaded to: ${result.path}`,
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({
+            success: true, itemKey,
+            path: result.path,
+            filename: result.filename,
+            contentType: result.contentType,
+            size: result.size,
+            fromCache: result.fromCache,
+            message: result.fromCache ? `File retrieved from cache: ${result.path}` : `File downloaded to: ${result.path}`,
+          }, null, 2) }],
         };
       } catch (error) {
         return {
-          content: [
-            {
-              type: 'text' as const,
-              text: JSON.stringify(
-                {
-                  success: false,
-                  itemKey: params.itemKey,
-                  error: error instanceof Error ? error.message : String(error),
-                },
-                null,
-                2
-              ),
-            },
-          ],
+          content: [{ type: 'text' as const, text: JSON.stringify({ success: false, itemKey, error: error instanceof Error ? error.message : String(error) }, null, 2) }],
         };
       }
     }
   );
 
   // clear_attachment_cache - 清除附件缓存
-  server.tool(
+  server.registerTool(
     'clear_attachment_cache',
-    'Clear cached attachment files',
     {
-      itemKey: z.string().optional().describe('Clear cache for specific item. If not provided, clears all cache.'),
+      title: 'Clear Attachment Cache',
+      description: `Clear cached attachment files to free disk space.
+- Provide itemKey to clear cache for a specific attachment
+- Omit itemKey to clear all cached attachments`,
+      inputSchema: {
+        itemKey: z.string().optional().describe('Clear cache for specific item only'),
+      },
     },
-    async (params) => {
-      await zoteroClient.clearAttachmentCache(params.itemKey);
-
+    async ({ itemKey }) => {
+      await zoteroClient.clearAttachmentCache(itemKey);
       return {
-        content: [
-          {
-            type: 'text' as const,
-            text: JSON.stringify(
-              {
-                success: true,
-                message: params.itemKey
-                  ? `Cache cleared for item ${params.itemKey}`
-                  : 'All attachment cache cleared',
-              },
-              null,
-              2
-            ),
-          },
-        ],
+        content: [{ type: 'text' as const, text: JSON.stringify({ success: true, message: itemKey ? `Cache cleared for item ${itemKey}` : 'All attachment cache cleared' }, null, 2) }],
       };
     }
   );
