@@ -1,11 +1,19 @@
 {
   "name": "@xbghc/zotero-mcp",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Zotero MCP Server for managing reference library",
   "type": "module",
   "main": "dist/index.js",
   "bin": {
     "zotero-mcp": "dist/index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xbghc/zotero-mcp.git"
+  },
+  "homepage": "https://github.com/xbghc/zotero-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/xbghc/zotero-mcp/issues"
   },
   "scripts": {
     "build": "tsc",
@@ -20,7 +28,7 @@
     "model-context-protocol",
     "reference-management"
   ],
-  "author": "",
+  "author": "xbghc",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.0",
