@@ -368,6 +368,59 @@ export class ZoteroClient {
   }
 
   /**
+   * 获取最近添加的文献
+   */
+  async getRecentItems(limit: number = 10): Promise<ZoteroItem[]> {
+    const path = `${this.getLibraryPath()}/items/top`;
+    const { data } = await this.request<ZoteroItem[]>(path, {
+      params: {
+        sort: 'dateAdded',
+        direction: 'desc',
+        limit,
+      },
+    });
+    return data;
+  }
+
+  /**
+   * 获取文献的子项目（附件、笔记等）
+   */
+  async getItemChildren(itemKey: string): Promise<ZoteroItem[]> {
+    const path = `${this.getLibraryPath()}/items/${itemKey}/children`;
+    const { data } = await this.request<ZoteroItem[]>(path);
+    return data;
+  }
+
+  /**
+   * 获取文献的全文内容
+   */
+  async getItemFulltext(itemKey: string): Promise<{
+    content: string;
+    indexedPages?: number;
+    totalPages?: number;
+    indexedChars?: number;
+    totalChars?: number;
+  } | null> {
+    const path = `${this.getLibraryPath()}/items/${itemKey}/fulltext`;
+    try {
+      const { data } = await this.request<{
+        content: string;
+        indexedPages?: number;
+        totalPages?: number;
+        indexedChars?: number;
+        totalChars?: number;
+      }>(path);
+      return data;
+    } catch (error) {
+      // 404 表示没有全文内容
+      if (error instanceof Error && error.message.includes('404')) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
    * 为文献添加标签
    */
   async addTagsToItem(itemKey: string, tags: string[]): Promise<void> {

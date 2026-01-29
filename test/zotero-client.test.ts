@@ -183,4 +183,50 @@ describe('ZoteroClient', () => {
       expect(item.data.deleted).toBe(1);
     });
   });
+
+  describe('getRecentItems', () => {
+    it('should return recently added items', async () => {
+      const items = await client.getRecentItems(5);
+
+      expect(Array.isArray(items)).toBe(true);
+      expect(items.length).toBeLessThanOrEqual(5);
+      if (items.length > 0) {
+        expect(items[0]).toHaveProperty('key');
+        expect(items[0]).toHaveProperty('data');
+      }
+    });
+  });
+
+  describe('getItemChildren', () => {
+    it('should return children of an item', async () => {
+      // 先获取一个有附件的文献
+      const result = await client.searchItems({ limit: 10 });
+      if (result.items.length === 0) {
+        console.log('No items in library, skipping test');
+        return;
+      }
+
+      // 尝试获取第一个文献的子项目
+      const children = await client.getItemChildren(result.items[0].key);
+      expect(Array.isArray(children)).toBe(true);
+    });
+  });
+
+  describe('getItemFulltext', () => {
+    it('should return fulltext or null', async () => {
+      // 先获取一个文献
+      const result = await client.searchItems({ limit: 1 });
+      if (result.items.length === 0) {
+        console.log('No items in library, skipping test');
+        return;
+      }
+
+      // 尝试获取全文（可能返回 null）
+      const fulltext = await client.getItemFulltext(result.items[0].key);
+      // fulltext 可能是 null 或包含 content 的对象
+      if (fulltext !== null) {
+        expect(fulltext).toHaveProperty('content');
+      }
+    });
+  });
 });

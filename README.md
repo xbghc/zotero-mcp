@@ -78,6 +78,9 @@ npm start
 |------|------|
 | `search_items` | 搜索文献 |
 | `get_item` | 获取文献详情 |
+| `get_recent_items` | 获取最近添加的文献 |
+| `get_item_children` | 获取附件和笔记 |
+| `get_item_fulltext` | 获取全文内容 |
 | `list_collections` | 列出分组 |
 | `get_collection_items` | 获取分组内文献 |
 | `list_tags` | 列出标签 |

@@ -51,6 +51,13 @@ export interface ZoteroItemData {
   collections?: string[];
   relations?: Record<string, string | string[]>;
   deleted?: number; // 1 = 在垃圾箱中
+  // 附件特有字段
+  parentItem?: string;
+  linkMode?: string;
+  contentType?: string;
+  filename?: string;
+  // 笔记特有字段
+  note?: string;
   [key: string]: unknown;
 }
 
