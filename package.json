@@ -1,6 +1,6 @@
 {
   "name": "@xbghc/zotero-mcp",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Zotero MCP Server for managing reference library",
   "type": "module",
   "main": "dist/index.js",

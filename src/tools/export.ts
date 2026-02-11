@@ -3,8 +3,20 @@
  */
 
 import { z } from 'zod';
+import { writeFile, mkdir } from 'fs/promises';
+import { dirname } from 'path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ZoteroClient } from '../zotero-client.js';
+
+const FORMAT_EXTENSIONS: Record<string, string> = {
+  bibtex: '.bib',
+  ris: '.ris',
+  csljson: '.json',
+  bibliography: '.txt',
+  coins: '.html',
+  refer: '.txt',
+  tei: '.xml',
+};
 
 /**
  * 注册导出相关的 Tools
@@ -30,7 +42,9 @@ export function registerExportTools(server: McpServer, zoteroClient: ZoteroClien
 - csljson: CSL JSON for citation processors
 - bibliography: Formatted citation text (use 'style' parameter)
 
-Common styles for bibliography: apa, chicago-author-date, ieee, vancouver, harvard`,
+Common styles for bibliography: apa, chicago-author-date, ieee, vancouver, harvard
+
+**Output:** Content is always saved to a file (to avoid flooding the conversation with large exports). Returns file path and summary.`,
       inputSchema: {
         // 选择方式（多选一）
         itemKeys: z.array(z.string()).optional().describe('Specific item keys to export'),
@@ -43,9 +57,11 @@ Common styles for bibliography: apa, chicago-author-date, ieee, vancouver, harva
         style: z.string().optional().describe('Citation style for bibliography format (e.g., apa, chicago-author-date, ieee)'),
         // 数量限制
         limit: z.number().min(1).max(500).optional().describe('Maximum items to export (default 100, max 500, ignored when exportAll=true)'),
+        // 输出路径
+        outputPath: z.string().optional().describe('File path to save the export. If not specified, saves to /tmp/zotero-export-{timestamp}{ext}'),
       },
     },
-    async ({ itemKeys, collectionKey, tag, query, exportAll, format, style, limit }) => {
+    async ({ itemKeys, collectionKey, tag, query, exportAll, format, style, limit, outputPath }) => {
       let keysToExport: string[] = [];
       const effectiveLimit = limit || 100;
 
@@ -86,11 +102,30 @@ Common styles for bibliography: apa, chicago-author-date, ieee, vancouver, harva
 
         const result = await zoteroClient.exportItems(keysToExport, format, style);
 
-        // 添加导出信息头
-        const header = `% Exported ${keysToExport.length} items\n% Format: ${format}\n\n`;
+        // 确定输出路径
+        const ext = FORMAT_EXTENSIONS[format] || '.txt';
+        const filePath = outputPath || `/tmp/zotero-export-${Date.now()}${ext}`;
+
+        // 确保目录存在并写入文件
+        await mkdir(dirname(filePath), { recursive: true });
+        await writeFile(filePath, result, 'utf-8');
+
+        // 返回摘要信息
+        const fileSize = Buffer.byteLength(result, 'utf-8');
+        const summary = {
+          success: true,
+          filePath,
+          itemCount: keysToExport.length,
+          format,
+          fileSize: fileSize > 1024 * 1024
+            ? `${(fileSize / (1024 * 1024)).toFixed(2)} MB`
+            : fileSize > 1024
+              ? `${(fileSize / 1024).toFixed(1)} KB`
+              : `${fileSize} B`,
+        };
 
         return {
-          content: [{ type: 'text' as const, text: header + result }],
+          content: [{ type: 'text' as const, text: JSON.stringify(summary, null, 2) }],
         };
       } catch (error) {
         return {
