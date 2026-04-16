@@ -20,7 +20,7 @@ export function registerManageTools(
       title: 'Update Item',
       description: `Update metadata fields of an existing item.
 Only provide fields you want to change - other fields remain unchanged.
-Common fields: title, date, DOI, url, abstractNote, publicationTitle, volume, issue, pages.`,
+Common fields: title, date, DOI, url, abstractNote, publicationTitle, volume, issue, pages, extra.`,
       inputSchema: {
         itemKey: z.string().describe('The key of the item to update'),
         title: z.string().optional().describe('New title'),
@@ -32,6 +32,7 @@ Common fields: title, date, DOI, url, abstractNote, publicationTitle, volume, is
         volume: z.string().optional().describe('New volume number'),
         issue: z.string().optional().describe('New issue number'),
         pages: z.string().optional().describe('New page range'),
+        extra: z.string().optional().describe('New Extra field content (free-form text; often used for citation keys, additional identifiers, etc.)'),
       },
     },
     async ({ itemKey, ...updates }) => {

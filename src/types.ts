@@ -42,6 +42,7 @@ export interface ZoteroItemData {
   pages?: string;
   date?: string;
   DOI?: string;
+  extra?: string;
   ISSN?: string;
   ISBN?: string;
   url?: string;
